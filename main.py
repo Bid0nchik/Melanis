@@ -36,7 +36,6 @@ from openai import APIStatusError, AsyncOpenAI, RateLimitError
 
 load_dotenv()
 
-
 def _env_str(name: str) -> str | None:
     raw = os.getenv(name)
     if raw is None:
