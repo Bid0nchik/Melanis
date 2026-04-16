@@ -57,7 +57,7 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 # Хранилище истории диалогов
 chat_history: Dict[int, List[Dict[str, str]]] = {}
-MAX_HISTORY_LENGTH = 10  # Максимальное количество пар сообщений в истории
+MAX_HISTORY_LENGTH = 100
 
 if not TELEGRAM_BOT_TOKEN:
     print("Задайте TELEGRAM_BOT_TOKEN в файле .env", file=sys.stderr)
