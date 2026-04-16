@@ -17,6 +17,8 @@ import sys
 from io import BytesIO
 from typing import List, Dict, Any
 
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ChatType, MessageEntityType
@@ -56,7 +58,7 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 # Хранилище истории диалогов
 chat_history: Dict[int, List[Dict[str, str]]] = {}
-MAX_HISTORY_LENGTH = 100
+MAX_HISTORY_LENGTH = 1000
 
 if not TELEGRAM_BOT_TOKEN:
     print("Задайте TELEGRAM_BOT_TOKEN в файле .env", file=sys.stderr)
@@ -539,9 +541,39 @@ async def handle_text(message: Message, bot: Bot) -> None:
         await wait.edit_text(f"Ошибка: {e}")
 
 
+async def on_startup(bot: Bot) -> None:
+    # Получаем URL от Render
+    render_url = os.getenv("RENDER_EXTERNAL_URL")
+    if not render_url:
+        logger.error("RENDER_EXTERNAL_URL not set!")
+        return
+    
+    webhook_url = f"{render_url}/webhook"
+    await bot.set_webhook(webhook_url)
+    logger.info(f"Webhook set to {webhook_url}")
+
+async def on_shutdown(bot: Bot) -> None:
+    await bot.delete_webhook()
+    logger.info("Webhook deleted")
+
+async def health_check(request):
+    return web.Response(text="OK")
+
+
 async def main() -> None:
     try:
-        await dp.start_polling(bot, allowed_updates=["message", "inline_query"])
+        dp.startup.register(on_startup)
+        dp.shutdown.register(on_shutdown)
+        app = web.Application()
+        app.router.add_get("/", health_check)
+        webhook_requests_handler = SimpleRequestHandler(
+            dispatcher=dp,
+            bot=bot,
+        )
+        webhook_requests_handler.register(app, path="/webhook")
+        setup_application(app, dp, bot=bot)
+        port = int(os.getenv("PORT", 10000))
+        await web._run_app(app, host="0.0.0.0", port=port)
     except TelegramNotFound:
         logger.error("Telegram вернул Not Found — обычно это неверный или отозванный TELEGRAM_BOT_TOKEN.")
         print(
@@ -562,7 +594,10 @@ async def main() -> None:
             file=sys.stderr,
         )
         raise
-
+    except Exception as e:
+        logger.error(f"Critical error: {e}")
+        raise
+        await dp.start_polling(bot, allowed_updates=["message", "inline_query"])
 
 if __name__ == "__main__":
     asyncio.run(main())
