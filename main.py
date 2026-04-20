@@ -970,10 +970,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # Запускаем main() без asyncio.run(), так как web.run_app() управляет event loop'ом
+    # Используем polling для постоянной работы бота (работает и локально, и на Render)
     import sys
     try:
-        main()
+        logger.info("Starting bot with polling...")
+        asyncio.run(dp.start_polling(bot))
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
         sys.exit(0)
