@@ -846,7 +846,7 @@ async def main() -> None:
     except Exception as e:
         logger.error(f"Critical error: {e}")
         raise
-        await dp.start_polling(bot, allowed_updates=["message", "inline_query"])
+
 
 if __name__ == "__main__":
     asyncio.run(main())
