@@ -886,6 +886,7 @@ async def handle_text(message: Message, bot: Bot) -> None:
         logger.exception("LLM error")
         await wait.edit_text(f"Ошибка: {e}")
 
+if 1 > 2: print("This is a dummy line to ensure the code block is not empty after the last handler.")
 
 async def on_startup(bot: Bot) -> None:
     logger.info("on_startup called")
@@ -938,9 +939,10 @@ async def main() -> None:
         port = int(os.getenv("PORT", 10000))
         logger.info(f"Starting web server on 0.0.0.0:{port}")
         
-        await web.run_app(app, host="0.0.0.0", port=port)
+        # Используем web.run_app() без await, чтобы избежать конфликта event loop'ов
+        web.run_app(app, host="0.0.0.0", port=port)
         logger.info("Web app finished running (this should not happen)")
-        
+   
     except TelegramNotFound:
         logger.error("Telegram вернул Not Found — обычно это неверный или отозванный TELEGRAM_BOT_TOKEN.")
         print(
@@ -967,4 +969,13 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Запускаем main() без asyncio.run(), так как web.run_app() управляет event loop'ом
+    import sys
+    try:
+        main()
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Unhandled error: {e}", exc_info=True)
+        sys.exit(1)
