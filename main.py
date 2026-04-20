@@ -938,7 +938,7 @@ async def main() -> None:
         port = int(os.getenv("PORT", 10000))
         logger.info(f"Starting web server on 0.0.0.0:{port}")
         
-        await web._run_app(app, host="0.0.0.0", port=port)
+        await web.run_app(app, host="0.0.0.0", port=port)
         logger.info("Web app finished running (this should not happen)")
         
     except TelegramNotFound:
