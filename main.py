@@ -218,19 +218,70 @@ async def download_photo(photo: PhotoSize) -> bytes:
     return bio.getvalue()
 
 
+async def download_file(file_id: str) -> bytes:
+    """Скачивает файл из Telegram по file_id и возвращает байты."""
+    file = await bot.get_file(file_id)
+    bio = BytesIO()
+    await bot.download_file(file.file_path, bio)
+    bio.seek(0)
+    return bio.getvalue()
+
+
+async def transcribe_voice(voice_bytes: bytes) -> str:
+    """Преобразует голос в текст используя OpenAI Whisper API."""
+    try:
+        # Для Whisper используем OpenAI API напрямую (Groq не поддерживает audio)
+        openai_key = os.getenv("OPENAI_API_KEY")
+        if not openai_key:
+            raise ValueError(
+                "Транскрипция голоса требует OPENAI_API_KEY.\n"
+                "Получи ключ на https://platform.openai.com/api-keys"
+            )
+        
+        # Создаём клиент OpenAI
+        from openai import OpenAI
+        openai_client = OpenAI(api_key=openai_key)
+        
+        # Используем asyncio.to_thread для синхронного API вызова
+        def _transcribe():
+            bio = BytesIO(voice_bytes)
+            bio.name = "audio.ogg"
+            transcript = openai_client.audio.transcriptions.create(
+                model="whisper-1",
+                file=bio,
+            )
+            return transcript.text.strip()
+        
+        transcript = await asyncio.to_thread(_transcribe)
+        return transcript
+    except ValueError as e:
+        # Переопубликуем ошибку о недостающем ключе
+        raise
+    except Exception as e:
+        logger.exception("Whisper transcription error")
+        raise
+
+
 def encode_image_to_base64(image_bytes: bytes) -> str:
     """Кодирует байты изображения в base64 строку."""
     return base64.b64encode(image_bytes).decode('utf-8')
 
 
-async def ask_llm(user_text: str, user_id: int) -> str:
-    """Отправляет текстовый запрос в Groq API с учётом истории диалога."""
+async def ask_llm(user_text: str, user_id: int, reply_context: str | None = None) -> str:
+    """Отправляет текстовый запрос в Groq API с учётом истории диалога и контекста ответа."""
     # Получаем историю пользователя
     history = chat_history.get(user_id, [])
     
     # Формируем сообщения: system + история + текущее
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
-    messages.append({"role": "user", "content": user_text})
+    
+    # Если есть контекст reply, добавляем его перед основным текстом
+    if reply_context:
+        full_text = f"Контекст (предыдущее сообщение):\n{reply_context}\n\nВопрос:\n{user_text}"
+    else:
+        full_text = user_text
+    
+    messages.append({"role": "user", "content": full_text})
     
     response = await llm_client.chat.completions.create(
         model=GROQ_MODEL,
@@ -245,7 +296,7 @@ async def ask_llm(user_text: str, user_id: int) -> str:
     
     answer = choice.message.content.strip()
     
-    # Сохраняем в историю
+    # Сохраняем в историю (без контекста reply)
     history.append({"role": "user", "content": user_text})
     history.append({"role": "assistant", "content": answer})
     
@@ -258,8 +309,8 @@ async def ask_llm(user_text: str, user_id: int) -> str:
     return answer
 
 
-async def ask_llm_with_image(user_text: str, image_bytes: bytes, user_id: int) -> str:
-    """Отправляет запрос с изображением в Groq API с учётом истории диалога."""
+async def ask_llm_with_image(user_text: str, image_bytes: bytes, user_id: int, reply_context: str | None = None) -> str:
+    """Отправляет запрос с изображением в Groq API с учётом истории диалога и контекста ответа."""
     base64_image = encode_image_to_base64(image_bytes)
     
     # Получаем историю пользователя
@@ -279,10 +330,13 @@ async def ask_llm_with_image(user_text: str, image_bytes: bytes, user_id: int) -
         ]
     }
     
-    if user_text:
-        current_message["content"].append({"type": "text", "text": user_text})
+    # Формируем текстовую часть с контекстом если есть
+    if reply_context:
+        text_content = f"Контекст (предыдущее сообщение):\n{reply_context}\n\nВопрос:\n{user_text}"
     else:
-        current_message["content"].append({"type": "text", "text": "Что изображено на этом фото? Опиши подробно."})
+        text_content = user_text or "Что изображено на этом фото? Опиши подробно."
+    
+    current_message["content"].append({"type": "text", "text": text_content})
     
     messages.append(current_message)
     
@@ -299,7 +353,7 @@ async def ask_llm_with_image(user_text: str, image_bytes: bytes, user_id: int) -
     
     answer = choice.message.content.strip()
     
-    # Сохраняем в историю
+    # Сохраняем в историю (без контекста reply)
     history_text = f"[Фото] {user_text}" if user_text else "[Фото]"
     history.append({"role": "user", "content": history_text})
     history.append({"role": "assistant", "content": answer})
@@ -317,6 +371,68 @@ def _truncate_telegram(s: str, max_len: int = 4096) -> str:
     if len(s) <= max_len:
         return s
     return s[: max_len - 1] + "…"
+
+
+def _split_message_into_chunks(text: str, max_len: int = 4096) -> List[str]:
+    """Разделяет большой текст на несколько сообщений для Telegram."""
+    if len(text) <= max_len:
+        return [text]
+    
+    chunks = []
+    remaining = text
+    
+    while remaining:
+        if len(remaining) <= max_len:
+            chunks.append(remaining)
+            break
+        
+        # Берём кусок до max_len
+        chunk = remaining[:max_len]
+        
+        # Стараемся разбить по последнему переводу строки или пробелу
+        last_newline = chunk.rfind('\n')
+        last_space = chunk.rfind(' ')
+        
+        split_pos = max(last_newline, last_space)
+        if split_pos > max_len // 2:  # Если точка разбиения не слишком близко к краю
+            chunk = remaining[:split_pos].rstrip()
+            remaining = remaining[split_pos:].lstrip()
+        else:
+            chunk = remaining[:max_len - 1]
+            remaining = remaining[max_len - 1:]
+        
+        chunks.append(chunk)
+    
+    return chunks
+
+
+async def _get_reply_context(message: Message) -> str | None:
+    """Получает контекст из сообщения, на которое отвечает пользователь."""
+    if not message.reply_to_message:
+        return None
+    
+    reply_msg = message.reply_to_message
+    context_parts = []
+    
+    # Имя/упоминание автора сообщения
+    if reply_msg.from_user:
+        user_name = reply_msg.from_user.first_name or reply_msg.from_user.username or "Пользователь"
+        context_parts.append(f"[Ответ {user_name}]")
+    
+    # Текст сообщения
+    if reply_msg.text:
+        context_parts.append(reply_msg.text)
+    elif reply_msg.caption:
+        context_parts.append(f"[Фото с подписью: {reply_msg.caption}]")
+    elif reply_msg.photo:
+        context_parts.append("[Сообщение содержит фото]")
+    elif reply_msg.document:
+        doc_name = reply_msg.document.file_name or "документ"
+        context_parts.append(f"[Сообщение содержит документ: {doc_name}]")
+    else:
+        context_parts.append("[Сообщение без текста]")
+    
+    return "\n".join(context_parts) if context_parts else None
 
 
 def get_private_keyboard() -> ReplyKeyboardMarkup:
@@ -398,10 +514,12 @@ async def cmd_start(message: Message) -> None:
     if message.chat.type == ChatType.PRIVATE:
         await message.answer(
             "Привет! Сообщения обрабатывает Groq.\n"
-            "• В личке — просто напиши текст или отправь фото.\n"
+            "• Текст → ответ ИИ\n"
+            "• Голос → транскрипция + ответ (требует OpenAI API ключ)\n"
+            "• Фото → анализ изображения\n"
+            "• В личке — просто напиши текст или отправь фото/голос.\n"
             "• В группе — @username_бота и вопрос в том же сообщении, ответ на сообщение бота или /команда@бот.\n"
             "• Inline: в любом чате набери @бота в поле ввода и текст — выбери результат.\n"
-            "• Фото: отправь фото с описанием или без — бот проанализирует изображение.\n"
             "• Память: бот помнит контекст разговора в личке.\n"
             "Команды: /help, /model, /clear\n",
             reply_markup=get_private_keyboard(),
@@ -409,10 +527,11 @@ async def cmd_start(message: Message) -> None:
     else:
         await message.answer(
             "Привет! Сообщения обрабатывает Groq.\n"
-            "• В личке — просто напиши текст или отправь фото.\n"
+            "• Текст → ответ ИИ\n"
+            "• Голос → транскрипция + ответ\n"
+            "• Фото → анализ изображения\n"
             "• В группе — @username_бота и вопрос в том же сообщении, ответ на сообщение бота или /команда@бот.\n"
             "• Inline: в любом чате набери @бота в поле ввода и текст — выбери результат.\n"
-            "• Фото: отправь фото с описанием или без — бот проанализирует изображение.\n"
             "Команды: /help, /model\n"
         )
 
@@ -421,8 +540,11 @@ async def cmd_start(message: Message) -> None:
 async def cmd_help(message: Message) -> None:
     if message.chat.type == ChatType.PRIVATE:
         await message.answer(
-            "Текст → ответ Groq. Inline: @бот запрос.\n"
-            "Фото → анализ изображения.\n"
+            "📝 Текст → ответ Groq\n"
+            "🎤 Голос → транскрипция (Whisper) + ответ\n"
+            "🖼️ Фото → анализ изображения\n"
+            "🎥 Видеозаписи → справка по обработке\n"
+            "💬 Inline: @бот запрос\n\n"
             f"Модель текста: <code>{GROQ_MODEL}</code>\n"
             f"Модель vision: <code>{GROQ_VISION_MODEL}</code>\n\n"
             "Бот помнит историю диалога в личных сообщениях.\n"
@@ -432,8 +554,9 @@ async def cmd_help(message: Message) -> None:
         )
     else:
         await message.answer(
-            "Текст → ответ Groq. Inline: @бот запрос.\n"
-            "Фото → анализ изображения.\n"
+            "📝 Текст → ответ Groq\n"
+            "🎤 Голос → транскрипция + ответ\n"
+            "🖼️ Фото → анализ изображения\n"
             f"Модель текста: <code>{GROQ_MODEL}</code>\n"
             f"Модель vision: <code>{GROQ_VISION_MODEL}</code>",
             parse_mode="HTML",
@@ -477,11 +600,24 @@ async def handle_photo(message: Message, bot: Bot) -> None:
         # Скачиваем фото
         image_bytes = await download_photo(photo)
         
+        # Получаем контекст из reply_to_message если есть
+        reply_context = await _get_reply_context(message)
+        
         # Отправляем на анализ с учётом истории (только в личке)
         user_id = message.from_user.id if message.chat.type == ChatType.PRIVATE else -message.chat.id
-        answer = await ask_llm_with_image(user_prompt, image_bytes, user_id)
+        answer = await ask_llm_with_image(user_prompt, image_bytes, user_id, reply_context)
         
-        await wait.edit_text(_truncate_telegram(answer))
+        # Разделяем ответ на несколько сообщений если нужно
+        chunks = _split_message_into_chunks(answer)
+        
+        if len(chunks) == 1:
+            # Если один кусок, просто отредактируем сообщение
+            await wait.edit_text(chunks[0])
+        else:
+            # Если несколько кусков, удалим ожидающее сообщение и отправим куски
+            await wait.delete()
+            for i, chunk in enumerate(chunks):
+                await message.answer(chunk)
         
     except RateLimitError as e:
         logger.warning("Groq rate limit / quota: %s", e)
@@ -505,6 +641,99 @@ async def handle_photo(message: Message, bot: Bot) -> None:
         await wait.edit_text(f"Ошибка при обработке фото: {e}")
 
 
+@dp.message(F.voice, addressed, not_cmd)
+async def handle_voice(message: Message, bot: Bot) -> None:
+    """Обработчик голосовых сообщений — преобразует в текст и отправляет в LLM."""
+    if not message.voice:
+        return
+    
+    user_prompt = await _prompt_for_llm(message, bot)
+    
+    wait = await message.answer("🎤 Преобразую голос в текст…")
+    
+    try:
+        # Скачиваем голосовой файл
+        voice_bytes = await download_file(message.voice.file_id)
+        
+        # Преобразуем в текст через Whisper
+        transcribed_text = await transcribe_voice(voice_bytes)
+        
+        if not transcribed_text:
+            await wait.edit_text("Не удалось разобрать аудио. Попробуй говорить четче.")
+            return
+        
+        # Если есть дополнительный текст вместе с голосом, добавляем его
+        if user_prompt:
+            full_prompt = f"{user_prompt}\n\n[Голосовое сообщение]: {transcribed_text}"
+        else:
+            full_prompt = transcribed_text
+        
+        # Получаем контекст из reply_to_message если есть
+        reply_context = await _get_reply_context(message)
+        
+        # Отправляем в LLM с учётом истории
+        user_id = message.from_user.id if message.chat.type == ChatType.PRIVATE else -message.chat.id
+        answer = await ask_llm(full_prompt, user_id, reply_context)
+        
+        # Разделяем ответ на несколько сообщений если нужно
+        chunks = _split_message_into_chunks(answer)
+        
+        if len(chunks) == 1:
+            await wait.edit_text(f"🗣️ *Расшифровка:*\n`{transcribed_text}`\n\n*Ответ:*\n{chunks[0]}", parse_mode="Markdown")
+        else:
+            await wait.delete()
+            await message.answer(f"🗣️ *Расшифровка:*\n`{transcribed_text}`", parse_mode="Markdown")
+            for chunk in chunks:
+                await message.answer(chunk)
+    
+    except ValueError as e:
+        # Ошибка о недостающем API ключе
+        logger.warning("Configuration error: %s", e)
+        await wait.edit_text(
+            f"⚠️ {str(e)}\n\n"
+            "Добавь OPENAI_API_KEY в .env файл для использования транскрипции голоса."
+        )
+    except RateLimitError as e:
+        logger.warning("API rate limit: %s", e)
+        await wait.edit_text(
+            "Лимит API (429): слишком много запросов.\n"
+            "Попробуй позже или проверь лимиты на платформе."
+        )
+    except APIStatusError as e:
+        logger.exception("API error during voice processing")
+        await wait.edit_text(f"Ошибка API ({e.status_code}): {e.message}")
+    except Exception as e:
+        logger.exception("Voice processing error")
+        await wait.edit_text(f"Ошибка при обработке голоса: {e}")
+
+
+@dp.message(F.video_note, addressed, not_cmd)
+async def handle_video_note(message: Message, bot: Bot) -> None:
+    """Обработчик видеозаписей (кружков) — преобразует в текст где возможно."""
+    if not message.video_note:
+        return
+    
+    wait = await message.answer("🎥 Обработка видеозаписи…")
+    
+    try:
+        # Скачиваем видеозаметку (обычно это маленькое видео)
+        video_bytes = await download_file(message.video_note.file_id)
+        
+        # К сожалению, Groq vision API работает с изображениями, а не видео
+        # Попытаемся обработать как медиа-файл
+        await wait.edit_text(
+            "⚠️ Видеозаписи обычно требуют специальной обработки.\n\n"
+            "Лучше всего:\n"
+            "1. Отправь скриншот видео (фотографию)\n"
+            "2. Или напиши текст с описанием\n\n"
+            "Если в видео есть речь, отправь как голосовое сообщение — я переведу в текст."
+        )
+    
+    except Exception as e:
+        logger.exception("Video note processing error")
+        await wait.edit_text(f"Ошибка при обработке видеозаписи: {e}")
+
+
 @dp.message(F.text, addressed, not_cmd)
 async def handle_text(message: Message, bot: Bot) -> None:
     if not message.text:
@@ -523,10 +752,30 @@ async def handle_text(message: Message, bot: Bot) -> None:
 
     wait = await message.answer("…")
     try:
+        # Получаем контекст из reply_to_message если есть
+        reply_context = await _get_reply_context(message)
+        
         # Используем историю только в личных сообщениях
         user_id = message.from_user.id if message.chat.type == ChatType.PRIVATE else -message.chat.id
-        answer = await ask_llm(user_prompt, user_id)
-        await wait.edit_text(_truncate_telegram(answer))
+        answer = await ask_llm(user_prompt, user_id, reply_context)
+        
+        # Разделяем ответ на несколько сообщений если нужно
+        chunks = _split_message_into_chunks(answer)
+        
+        if len(chunks) == 1:
+            # Если один кусок, просто отредактируем сообщение
+            await wait.edit_text(chunks[0])
+        else:
+            # Если несколько кусков, удалим ожидающее сообщение и отправим куски
+            await wait.delete()
+            for i, chunk in enumerate(chunks):
+                if i == 0:
+                    # Первый кусок отправляем как ответ
+                    await message.answer(chunk)
+                else:
+                    # Остальные куски просто отправляем
+                    await message.answer(chunk)
+    
     except RateLimitError as e:
         logger.warning("Groq rate limit / quota: %s", e)
         await wait.edit_text(
