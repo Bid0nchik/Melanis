@@ -113,17 +113,21 @@ class AddressedToBot(BaseFilter):
 
     async def __call__(self, message: Message, bot: Bot) -> bool:
         if message.chat.type == ChatType.PRIVATE:
+            logger.info(f"AddressedToBot: Private chat - PASS")
             return True
         if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
+            logger.info(f"AddressedToBot: Not group/supergroup ({message.chat.type}) - FAIL")
             return False
 
         me = await bot.get_me()
         if not me.username:
+            logger.info(f"AddressedToBot: Bot has no username - FAIL")
             return False
         un = me.username.lower()
 
         rp = message.reply_to_message
         if rp and rp.from_user and rp.from_user.id == me.id:
+            logger.info(f"AddressedToBot: Reply to bot - PASS")
             return True
 
         text = message.text or message.caption or ""
@@ -132,6 +136,7 @@ class AddressedToBot(BaseFilter):
             if "@" in first:
                 _, _, suffix = first.partition("@")
                 if suffix.lower() == un:
+                    logger.info(f"AddressedToBot: Command @bot - PASS")
                     return True
 
         full = message.text or message.caption or ""
@@ -139,10 +144,13 @@ class AddressedToBot(BaseFilter):
             if e.type == MessageEntityType.MENTION:
                 frag = full[e.offset : e.offset + e.length]
                 if frag.lstrip("@").lower() == un:
+                    logger.info(f"AddressedToBot: Mention @bot - PASS")
                     return True
             if e.type == MessageEntityType.TEXT_MENTION and e.user and e.user.id == me.id:
+                logger.info(f"AddressedToBot: Text mention bot - PASS")
                 return True
 
+        logger.info(f"AddressedToBot: No match in group - FAIL")
         return False
 
 
@@ -155,7 +163,9 @@ class NotTelegramCommand(BaseFilter):
     async def __call__(self, message: Message) -> bool:
         for e in message.entities or ():
             if e.type == MessageEntityType.BOT_COMMAND and e.offset == 0:
+                logger.info(f"NotTelegramCommand: Message starts with command - FAIL")
                 return False
+        logger.info(f"NotTelegramCommand: Not a command - PASS")
         return True
 
 
@@ -269,6 +279,8 @@ def encode_image_to_base64(image_bytes: bytes) -> str:
 
 async def ask_llm(user_text: str, user_id: int, reply_context: str | None = None) -> str:
     """Отправляет текстовый запрос в Groq API с учётом истории диалога и контекста ответа."""
+    logger.info(f"ask_llm called: user_id={user_id}, text_len={len(user_text)}, has_reply={reply_context is not None}")
+    
     # Получаем историю пользователя
     history = chat_history.get(user_id, [])
     
@@ -283,18 +295,26 @@ async def ask_llm(user_text: str, user_id: int, reply_context: str | None = None
     
     messages.append({"role": "user", "content": full_text})
     
-    response = await llm_client.chat.completions.create(
-        model=GROQ_MODEL,
-        messages=messages,
-        temperature=0.7,
-        max_tokens=1024,
-    )
+    try:
+        logger.info(f"ask_llm: Sending request to Groq API with {len(messages)} messages")
+        response = await llm_client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=1024,
+        )
+        logger.info(f"ask_llm: Got response from Groq")
+    except Exception as e:
+        logger.error(f"ask_llm: Error calling Groq API: {e}", exc_info=True)
+        raise
     
     choice = response.choices[0]
     if not choice.message.content:
+        logger.warning(f"ask_llm: Empty response from Groq")
         return "Не удалось сформировать ответ."
     
     answer = choice.message.content.strip()
+    logger.info(f"ask_llm: Got answer of length {len(answer)}")
     
     # Сохраняем в историю (без контекста reply)
     history.append({"role": "user", "content": user_text})
@@ -586,6 +606,7 @@ async def cmd_clear(message: Message) -> None:
 @dp.message(F.photo, addressed, not_cmd)
 async def handle_photo(message: Message, bot: Bot) -> None:
     """Обработчик фотографий."""
+    logger.info(f"handle_photo called: chat_id={message.chat.id}")
     if not message.photo:
         return
     
@@ -644,6 +665,7 @@ async def handle_photo(message: Message, bot: Bot) -> None:
 @dp.message(F.voice, addressed, not_cmd)
 async def handle_voice(message: Message, bot: Bot) -> None:
     """Обработчик голосовых сообщений — преобразует в текст и отправляет в LLM."""
+    logger.info(f"handle_voice called: chat_id={message.chat.id}")
     if not message.voice:
         return
     
@@ -710,6 +732,7 @@ async def handle_voice(message: Message, bot: Bot) -> None:
 @dp.message(F.video_note, addressed, not_cmd)
 async def handle_video_note(message: Message, bot: Bot) -> None:
     """Обработчик видеозаписей (кружков) — преобразует в текст где возможно."""
+    logger.info(f"handle_video_note called: chat_id={message.chat.id}")
     if not message.video_note:
         return
     
@@ -736,10 +759,13 @@ async def handle_video_note(message: Message, bot: Bot) -> None:
 
 @dp.message(F.text, addressed, not_cmd)
 async def handle_text(message: Message, bot: Bot) -> None:
+    logger.info(f"handle_text called: chat_id={message.chat.id}, text={message.text[:50] if message.text else 'None'}")
     if not message.text:
+        logger.info("handle_text: No text, returning")
         return
 
     user_prompt = await _prompt_for_llm(message, bot)
+    logger.info(f"handle_text: Got prompt of length {len(user_prompt)}")
 
     if (
         message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP)
@@ -747,34 +773,46 @@ async def handle_text(message: Message, bot: Bot) -> None:
     ):
         me = await bot.get_me()
         un = f"@{me.username}" if me.username else "бота"
+        logger.info("handle_text: Empty prompt in group, sending help message")
         await message.reply(f"Напиши текст после {un}, например: {un} что такое pytest?")
         return
 
     wait = await message.answer("…")
+    logger.info(f"handle_text: Sent wait message, now processing text")
     try:
         # Получаем контекст из reply_to_message если есть
         reply_context = await _get_reply_context(message)
+        logger.info(f"handle_text: Got reply context: {reply_context is not None}")
         
         # Используем историю только в личных сообщениях
         user_id = message.from_user.id if message.chat.type == ChatType.PRIVATE else -message.chat.id
+        logger.info(f"handle_text: Calling ask_llm with user_id={user_id}")
         answer = await ask_llm(user_prompt, user_id, reply_context)
+        logger.info(f"handle_text: Got answer of length {len(answer)}")
         
         # Разделяем ответ на несколько сообщений если нужно
         chunks = _split_message_into_chunks(answer)
+        logger.info(f"handle_text: Split answer into {len(chunks)} chunks")
         
         if len(chunks) == 1:
             # Если один кусок, просто отредактируем сообщение
+            logger.info("handle_text: Single chunk, editing wait message")
             await wait.edit_text(chunks[0])
         else:
             # Если несколько кусков, удалим ожидающее сообщение и отправим куски
+            logger.info(f"handle_text: Multiple chunks, deleting wait message and sending {len(chunks)} messages")
             await wait.delete()
             for i, chunk in enumerate(chunks):
                 if i == 0:
                     # Первый кусок отправляем как ответ
+                    logger.info(f"handle_text: Sending chunk {i}")
                     await message.answer(chunk)
                 else:
                     # Остальные куски просто отправляем
+                    logger.info(f"handle_text: Sending chunk {i}")
                     await message.answer(chunk)
+        
+        logger.info("handle_text: Completed successfully")
     
     except RateLimitError as e:
         logger.warning("Groq rate limit / quota: %s", e)
