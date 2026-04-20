@@ -52,7 +52,7 @@ TELEGRAM_BOT_TOKEN = _env_str("TELEGRAM_BOT_TOKEN")
 TELEGRAM_PROXY = _env_str("TELEGRAM_PROXY")
 GROQ_API_KEY = _env_str("GROQ_API_KEY")
 GROQ_MODEL = _env_str("GROQ_MODEL") or "llama-3.3-70b-versatile"
-GROQ_VISION_MODEL = _env_str("GROQ_VISION_MODEL") or "llama-3.2-90b-vision-preview"
+GROQ_VISION_MODEL = _env_str("GROQ_VISION_MODEL") or "llama-3.2-11b-vision-preview"
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
@@ -701,8 +701,8 @@ async def handle_photo(message: Message, bot: Bot) -> None:
             try:
                 await wait.edit_text(
                     f"❌ Модель {GROQ_VISION_MODEL} выведена из эксплуатации.\n\n"
-                    f"Пожалуйста, обновите GROQ_VISION_MODEL в .env на актуальную:\n"
-                    f"llama-3.2-90b-vision-preview"
+                    f"Используется новая модель: llama-3.2-11b-vision-preview\n"
+                    f"Пожалуйста, обновите GROQ_VISION_MODEL в .env"
                 )
             except Exception as edit_error:
                 logger.error(f"handle_photo: Failed to edit wait message: {edit_error}")
