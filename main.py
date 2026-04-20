@@ -970,11 +970,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # Используем polling для постоянной работы бота (работает и локально, и на Render)
+    # Используем webhook для постоянной работы (лучше для Render)
     import sys
     try:
-        logger.info("Starting bot with polling...")
-        asyncio.run(dp.start_polling(bot))
+        main()
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
         sys.exit(0)
