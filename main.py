@@ -526,81 +526,111 @@ async def inline_query_handler(inline_query: InlineQuery) -> None:
 
 @dp.message(CommandStart(), addressed)
 async def cmd_start(message: Message) -> None:
+    logger.info(f"cmd_start: user_id={message.from_user.id}")
     # Очищаем историю при старте
     user_id = message.from_user.id
     if user_id in chat_history:
         del chat_history[user_id]
     
     if message.chat.type == ChatType.PRIVATE:
-        await message.answer(
-            "Привет! Сообщения обрабатывает Groq.\n"
-            "• Текст → ответ ИИ\n"
-            "• Голос → транскрипция + ответ (требует OpenAI API ключ)\n"
-            "• Фото → анализ изображения\n"
-            "• В личке — просто напиши текст или отправь фото/голос.\n"
-            "• В группе — @username_бота и вопрос в том же сообщении, ответ на сообщение бота или /команда@бот.\n"
-            "• Inline: в любом чате набери @бота в поле ввода и текст — выбери результат.\n"
-            "• Память: бот помнит контекст разговора в личке.\n"
-            "Команды: /help, /model, /clear\n",
-            reply_markup=get_private_keyboard(),
-        )
+        try:
+            await message.answer(
+                "Привет! Сообщения обрабатывает Groq.\n"
+                "• Текст → ответ ИИ\n"
+                "• Голос → транскрипция + ответ (требует OpenAI API ключ)\n"
+                "• Фото → анализ изображения\n"
+                "• В личке — просто напиши текст или отправь фото/голос.\n"
+                "• В группе — @username_бота и вопрос в том же сообщении, ответ на сообщение бота или /команда@бот.\n"
+                "• Inline: в любом чате набери @бота в поле ввода и текст — выбери результат.\n"
+                "• Память: бот помнит контекст разговора в личке.\n"
+                "Команды: /help, /model, /clear\n",
+                reply_markup=get_private_keyboard(),
+            )
+            logger.info(f"cmd_start: Message sent successfully")
+        except Exception as e:
+            logger.error(f"cmd_start: Error sending message: {e}", exc_info=True)
+            raise
     else:
-        await message.answer(
-            "Привет! Сообщения обрабатывает Groq.\n"
-            "• Текст → ответ ИИ\n"
-            "• Голос → транскрипция + ответ\n"
-            "• Фото → анализ изображения\n"
-            "• В группе — @username_бота и вопрос в том же сообщении, ответ на сообщение бота или /команда@бот.\n"
-            "• Inline: в любом чате набери @бота в поле ввода и текст — выбери результат.\n"
-            "Команды: /help, /model\n"
-        )
+        try:
+            await message.answer(
+                "Привет! Сообщения обрабатывает Groq.\n"
+                "• Текст → ответ ИИ\n"
+                "• Голос → транскрипция + ответ\n"
+                "• Фото → анализ изображения\n"
+                "• В группе — @username_бота и вопрос в том же сообщении, ответ на сообщение бота или /команда@бот.\n"
+                "• Inline: в любом чате набери @бота в поле ввода и текст — выбери результат.\n"
+                "Команды: /help, /model\n"
+            )
+            logger.info(f"cmd_start: Group message sent successfully")
+        except Exception as e:
+            logger.error(f"cmd_start: Error sending group message: {e}", exc_info=True)
+            raise
 
 
 @dp.message(Command("help"), addressed)
 async def cmd_help(message: Message) -> None:
-    if message.chat.type == ChatType.PRIVATE:
-        await message.answer(
-            "📝 Текст → ответ Groq\n"
-            "🎤 Голос → транскрипция (Whisper) + ответ\n"
-            "🖼️ Фото → анализ изображения\n"
-            "🎥 Видеозаписи → справка по обработке\n"
-            "💬 Inline: @бот запрос\n\n"
-            f"Модель текста: <code>{GROQ_MODEL}</code>\n"
-            f"Модель vision: <code>{GROQ_VISION_MODEL}</code>\n\n"
-            "Бот помнит историю диалога в личных сообщениях.\n"
-            "/clear — очистить историю.",
-            parse_mode="HTML",
-            reply_markup=get_private_keyboard(),
-        )
-    else:
-        await message.answer(
-            "📝 Текст → ответ Groq\n"
-            "🎤 Голос → транскрипция + ответ\n"
-            "🖼️ Фото → анализ изображения\n"
-            f"Модель текста: <code>{GROQ_MODEL}</code>\n"
-            f"Модель vision: <code>{GROQ_VISION_MODEL}</code>",
-            parse_mode="HTML",
-        )
+    logger.info(f"cmd_help: user_id={message.from_user.id}")
+    try:
+        if message.chat.type == ChatType.PRIVATE:
+            await message.answer(
+                "📝 Текст → ответ Groq\n"
+                "🎤 Голос → транскрипция (Whisper) + ответ\n"
+                "🖼️ Фото → анализ изображения\n"
+                "🎥 Видеозаписи → справка по обработке\n"
+                "💬 Inline: @бот запрос\n\n"
+                f"Модель текста: <code>{GROQ_MODEL}</code>\n"
+                f"Модель vision: <code>{GROQ_VISION_MODEL}</code>\n\n"
+                "Бот помнит историю диалога в личных сообщениях.\n"
+                "/clear — очистить историю.",
+                parse_mode="HTML",
+                reply_markup=get_private_keyboard(),
+            )
+        else:
+            await message.answer(
+                "📝 Текст → ответ Groq\n"
+                "🎤 Голос → транскрипция + ответ\n"
+                "🖼️ Фото → анализ изображения\n"
+                f"Модель текста: <code>{GROQ_MODEL}</code>\n"
+                f"Модель vision: <code>{GROQ_VISION_MODEL}</code>",
+                parse_mode="HTML",
+            )
+        logger.info(f"cmd_help: Message sent successfully")
+    except Exception as e:
+        logger.error(f"cmd_help: Error: {e}", exc_info=True)
+        raise
 
 
 @dp.message(Command("model"), addressed)
 async def cmd_model(message: Message) -> None:
-    await message.answer(
-        f"Текстовая модель: <code>{GROQ_MODEL}</code>\n"
-        f"Vision модель: <code>{GROQ_VISION_MODEL}</code>",
-        parse_mode="HTML"
-    )
+    logger.info(f"cmd_model: user_id={message.from_user.id}")
+    try:
+        await message.answer(
+            f"Текстовая модель: <code>{GROQ_MODEL}</code>\n"
+            f"Vision модель: <code>{GROQ_VISION_MODEL}</code>",
+            parse_mode="HTML"
+        )
+        logger.info(f"cmd_model: Message sent successfully")
+    except Exception as e:
+        logger.error(f"cmd_model: Error: {e}", exc_info=True)
+        raise
 
 
 @dp.message(Command("clear"), addressed)
 async def cmd_clear(message: Message) -> None:
     """Очищает историю диалога пользователя."""
-    user_id = message.from_user.id
-    if user_id in chat_history:
-        del chat_history[user_id]
-        await message.answer("🧹 История диалога очищена.")
-    else:
-        await message.answer("📭 История диалога уже пуста.")
+    logger.info(f"cmd_clear: user_id={message.from_user.id}")
+    try:
+        user_id = message.from_user.id
+        if user_id in chat_history:
+            del chat_history[user_id]
+            await message.answer("🧹 История диалога очищена.")
+            logger.info(f"cmd_clear: History cleared for user {user_id}")
+        else:
+            await message.answer("📭 История диалога уже пуста.")
+            logger.info(f"cmd_clear: No history to clear for user {user_id}")
+    except Exception as e:
+        logger.error(f"cmd_clear: Error: {e}", exc_info=True)
+        raise
 
 
 @dp.message(F.photo, addressed, not_cmd)
@@ -608,58 +638,87 @@ async def handle_photo(message: Message, bot: Bot) -> None:
     """Обработчик фотографий."""
     logger.info(f"handle_photo called: chat_id={message.chat.id}")
     if not message.photo:
+        logger.info("handle_photo: No photo, returning")
         return
     
     user_prompt = await _prompt_for_llm(message, bot)
+    logger.info(f"handle_photo: Got prompt of length {len(user_prompt)}")
     
     # Получаем самое большое фото (последнее в списке)
     photo = message.photo[-1]
     
     wait = await message.answer("🔍 Анализирую фото…")
+    logger.info("handle_photo: Sent wait message")
     
     try:
         # Скачиваем фото
+        logger.info("handle_photo: Downloading photo...")
         image_bytes = await download_photo(photo)
+        logger.info(f"handle_photo: Downloaded photo, size={len(image_bytes)} bytes")
         
         # Получаем контекст из reply_to_message если есть
         reply_context = await _get_reply_context(message)
+        logger.info(f"handle_photo: Got reply context: {reply_context is not None}")
         
         # Отправляем на анализ с учётом истории (только в личке)
         user_id = message.from_user.id if message.chat.type == ChatType.PRIVATE else -message.chat.id
+        logger.info(f"handle_photo: Calling ask_llm_with_image for user_id={user_id}")
         answer = await ask_llm_with_image(user_prompt, image_bytes, user_id, reply_context)
+        logger.info(f"handle_photo: Got answer of length {len(answer)}")
         
         # Разделяем ответ на несколько сообщений если нужно
         chunks = _split_message_into_chunks(answer)
+        logger.info(f"handle_photo: Split into {len(chunks)} chunks")
         
         if len(chunks) == 1:
             # Если один кусок, просто отредактируем сообщение
+            logger.info("handle_photo: Editing wait message with answer")
             await wait.edit_text(chunks[0])
         else:
             # Если несколько кусков, удалим ожидающее сообщение и отправим куски
+            logger.info(f"handle_photo: Deleting wait message and sending {len(chunks)} chunks")
             await wait.delete()
             for i, chunk in enumerate(chunks):
+                logger.info(f"handle_photo: Sending chunk {i}")
                 await message.answer(chunk)
         
+        logger.info("handle_photo: Completed successfully")
+        
     except RateLimitError as e:
-        logger.warning("Groq rate limit / quota: %s", e)
-        await wait.edit_text(
-            "Лимит Groq (429): слишком много запросов или квота.\n"
-            "https://console.groq.com — проверь лимиты."
-        )
-    except APIStatusError as e:
-        if "model_decommissioned" in str(e):
-            logger.error("Vision model decommissioned: %s", GROQ_VISION_MODEL)
+        logger.warning("handle_photo: Groq rate limit / quota: %s", e)
+        try:
             await wait.edit_text(
-                f"❌ Модель {GROQ_VISION_MODEL} выведена из эксплуатации.\n\n"
-                f"Пожалуйста, обновите GROQ_VISION_MODEL в .env на актуальную:\n"
-                f"llama-3.2-90b-vision-preview"
+                "Лимит Groq (429): слишком много запросов или квота.\n"
+                "https://console.groq.com — проверь лимиты."
             )
+        except Exception as edit_error:
+            logger.error(f"handle_photo: Failed to edit wait message: {edit_error}")
+            
+    except APIStatusError as e:
+        logger.error(f"handle_photo: APIStatusError: {e}")
+        if "model_decommissioned" in str(e):
+            logger.error("handle_photo: Vision model decommissioned: %s", GROQ_VISION_MODEL)
+            try:
+                await wait.edit_text(
+                    f"❌ Модель {GROQ_VISION_MODEL} выведена из эксплуатации.\n\n"
+                    f"Пожалуйста, обновите GROQ_VISION_MODEL в .env на актуальную:\n"
+                    f"llama-3.2-90b-vision-preview"
+                )
+            except Exception as edit_error:
+                logger.error(f"handle_photo: Failed to edit wait message: {edit_error}")
         else:
-            logger.exception("Groq API error")
-            await wait.edit_text(f"Ошибка API ({e.status_code}): {e.message}")
+            logger.exception("handle_photo: Groq API error")
+            try:
+                await wait.edit_text(f"Ошибка API ({e.status_code}): {e.message}")
+            except Exception as edit_error:
+                logger.error(f"handle_photo: Failed to edit wait message: {edit_error}")
+                
     except Exception as e:
-        logger.exception("Photo processing error")
-        await wait.edit_text(f"Ошибка при обработке фото: {e}")
+        logger.exception("handle_photo: Unexpected error")
+        try:
+            await wait.edit_text(f"Ошибка при обработке фото: {e}")
+        except Exception as edit_error:
+            logger.error(f"handle_photo: Failed to edit wait message: {edit_error}")
 
 
 @dp.message(F.voice, addressed, not_cmd)
@@ -829,6 +888,7 @@ async def handle_text(message: Message, bot: Bot) -> None:
 
 
 async def on_startup(bot: Bot) -> None:
+    logger.info("on_startup called")
     # Получаем URL от Render
     render_url = os.getenv("RENDER_EXTERNAL_URL")
     if not render_url:
@@ -836,31 +896,51 @@ async def on_startup(bot: Bot) -> None:
         return
     
     webhook_url = f"{render_url}/webhook"
-    await bot.set_webhook(webhook_url)
-    logger.info(f"Webhook set to {webhook_url}")
+    logger.info(f"Setting webhook to {webhook_url}")
+    try:
+        await bot.set_webhook(webhook_url)
+        logger.info(f"Webhook successfully set to {webhook_url}")
+    except Exception as e:
+        logger.error(f"Failed to set webhook: {e}", exc_info=True)
 
 async def on_shutdown(bot: Bot) -> None:
-    await bot.delete_webhook()
-    logger.info("Webhook deleted")
+    logger.info("on_shutdown called - deleting webhook")
+    try:
+        await bot.delete_webhook()
+        logger.info("Webhook deleted successfully")
+    except Exception as e:
+        logger.error(f"Failed to delete webhook: {e}", exc_info=True)
 
 async def health_check(request):
+    logger.debug(f"Health check from {request.remote}")
     return web.Response(text="OK")
 
 
 async def main() -> None:
+    logger.info("=== BOT STARTUP ===")
     try:
+        logger.info("Registering startup/shutdown handlers")
         dp.startup.register(on_startup)
         dp.shutdown.register(on_shutdown)
+        
+        logger.info("Creating web application")
         app = web.Application()
         app.router.add_get("/", health_check)
+        
+        logger.info("Setting up webhook handler")
         webhook_requests_handler = SimpleRequestHandler(
             dispatcher=dp,
             bot=bot,
         )
         webhook_requests_handler.register(app, path="/webhook")
         setup_application(app, dp, bot=bot)
+        
         port = int(os.getenv("PORT", 10000))
+        logger.info(f"Starting web server on 0.0.0.0:{port}")
+        
         await web._run_app(app, host="0.0.0.0", port=port)
+        logger.info("Web app finished running (this should not happen)")
+        
     except TelegramNotFound:
         logger.error("Telegram вернул Not Found — обычно это неверный или отозванный TELEGRAM_BOT_TOKEN.")
         print(
@@ -882,7 +962,7 @@ async def main() -> None:
         )
         raise
     except Exception as e:
-        logger.error(f"Critical error: {e}")
+        logger.error(f"Critical error in main: {e}", exc_info=True)
         raise
 
 
