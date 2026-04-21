@@ -946,8 +946,15 @@ def main() -> None:
         logger.info(f"Starting web server on 0.0.0.0:{port}")
         
         # web.run_app() блокирует выполнение и управляет event loop'ом
-        web.run_app(app, host="0.0.0.0", port=port)
-        logger.info("Web app finished running (this should not happen)")
+        try:
+            web.run_app(app, host="0.0.0.0", port=port)
+        except KeyboardInterrupt:
+            logger.info("Received KeyboardInterrupt, shutting down gracefully")
+        except Exception as e:
+            logger.error(f"Unexpected error in web.run_app: {e}", exc_info=True)
+            raise
+        finally:
+            logger.info("Web app finished running")
    
     except TelegramNotFound:
         logger.error("Telegram вернул Not Found — обычно это неверный или отозванный TELEGRAM_BOT_TOKEN.")
@@ -975,10 +982,18 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # Используем webhook для постоянной работы (лучше для Render)
     import sys
     try:
-        main()
+        # Если есть RENDER_EXTERNAL_URL, используем webhook (для Render)
+        render_url = os.getenv("RENDER_EXTERNAL_URL")
+        logger.info(f"RENDER_EXTERNAL_URL: {render_url}")
+        if render_url:
+            logger.info("Detected Render environment, using webhook mode")
+            main()
+        else:
+            logger.info("No Render environment detected, using polling mode")
+            import asyncio
+            asyncio.run(run_polling_with_health_check())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
         sys.exit(0)
