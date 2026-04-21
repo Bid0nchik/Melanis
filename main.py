@@ -905,12 +905,17 @@ async def on_startup(bot: Bot) -> None:
         logger.error(f"Failed to set webhook: {e}", exc_info=True)
 
 async def on_shutdown(bot: Bot) -> None:
-    logger.info("on_shutdown called - deleting webhook")
-    try:
-        await bot.delete_webhook()
-        logger.info("Webhook deleted successfully")
-    except Exception as e:
-        logger.error(f"Failed to delete webhook: {e}", exc_info=True)
+    logger.info("on_shutdown called")
+    # На Render не удаляем webhook, чтобы он оставался активным между перезапусками
+    if not os.getenv("RENDER_EXTERNAL_URL"):
+        logger.info("Deleting webhook (not on Render)")
+        try:
+            await bot.delete_webhook()
+            logger.info("Webhook deleted successfully")
+        except Exception as e:
+            logger.error(f"Failed to delete webhook: {e}", exc_info=True)
+    else:
+        logger.info("Skipping webhook deletion on Render")
 
 async def health_check(request):
     logger.debug(f"Health check from {request.remote}")
